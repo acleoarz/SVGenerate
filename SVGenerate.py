@@ -1,5 +1,4 @@
 import os
-import asyncio
 import cairosvg
 from telegram import Update
 from telegram.ext import (
@@ -32,14 +31,14 @@ async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove("input.svg")
     os.remove("output.png")
 
-async def main():
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_svg))
 
     print("Bot started...")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
