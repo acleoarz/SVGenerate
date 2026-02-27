@@ -1,79 +1,82 @@
 import logging
 import os
 import io
+import threading
+
+from flask import Flask
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import cairosvg
 
-# Логирование
+# --- ЛОГИ ---
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Токен берём из переменной окружения
 TOKEN = os.getenv("TOKEN")
 
-if not TOKEN:
-    raise ValueError("TOKEN не найден. Добавь его в Environment Variables на Render.")
-
+# --- КОМАНДА /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Отправь мне SVG код или файл .svg, и я превращу его в PNG картинку."
+        "Привет! Отправь мне SVG код или файл .svg, и я превращу его в PNG."
     )
 
-async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    svg_code = update.message.text
+# --- ОБРАБОТКА ТЕКСТА ---
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+
+    if "<svg" not in text:
+        await update.message.reply_text("Это не похоже на SVG код.")
+        return
 
     try:
-        if "<svg" not in svg_code.lower():
-            await update.message.reply_text("Это не похоже на SVG код.")
-            return
-
-        png_data = cairosvg.svg2png(bytestring=svg_code.encode("utf-8"))
-
-        await update.message.reply_photo(
-            photo=io.BytesIO(png_data),
-            caption="Вот твоя картинка!"
-        )
-
+        png_bytes = cairosvg.svg2png(bytestring=text.encode("utf-8"))
+        await update.message.reply_photo(photo=png_bytes)
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
-        await update.message.reply_text("Ошибка при обработке SVG.")
+        logger.error(e)
+        await update.message.reply_text("Ошибка при конвертации SVG.")
 
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- ОБРАБОТКА ФАЙЛОВ ---
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    document = update.message.document
+
+    if not document.file_name.endswith(".svg"):
+        await update.message.reply_text("Пожалуйста, отправь файл .svg")
+        return
+
     try:
-        document = update.message.document
-
-        if not document.file_name.lower().endswith(".svg"):
-            await update.message.reply_text("Пожалуйста, отправь файл в формате .svg")
-            return
-
         file = await document.get_file()
-        file_bytes = await file.download_as_bytearray()
-        svg_code = file_bytes.decode("utf-8")
-
-        png_data = cairosvg.svg2png(bytestring=svg_code.encode("utf-8"))
-
-        await update.message.reply_photo(
-            photo=io.BytesIO(png_data),
-            caption="Вот твоя картинка из файла!"
-        )
-
+        svg_bytes = await file.download_as_bytearray()
+        png_bytes = cairosvg.svg2png(bytestring=svg_bytes)
+        await update.message.reply_photo(photo=png_bytes)
     except Exception as e:
-        logger.error(f"Ошибка с файлом: {e}")
-        await update.message.reply_text("Не могу обработать этот файл.")
+        logger.error(e)
+        await update.message.reply_text("Ошибка при обработке файла.")
 
-def main():
-    app = Application.builder().token(TOKEN).build()
+# --- ЗАПУСК БОТА ---
+def run_bot():
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_svg))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    print("Бот запущен...")
+    logger.info("Бот запущен...")
     app.run_polling()
 
+# --- FLASK ДЛЯ RENDER FREE ---
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "Bot is running"
+
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+# --- ЗАПУСК ---
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=run_bot).start()
+    run_flask()
