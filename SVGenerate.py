@@ -1,41 +1,45 @@
 import os
+import asyncio
 import cairosvg
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Отправь мне SVG файл — я конвертирую его в PNG.")
+    await update.message.reply_text("Отправь SVG файл — я конвертирую его в PNG.")
 
-# обработка SVG
 async def handle_svg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
 
-    if document.mime_type != "image/svg+xml":
+    if not document or document.mime_type != "image/svg+xml":
         await update.message.reply_text("Это не SVG файл.")
         return
 
     file = await document.get_file()
-    svg_path = "input.svg"
-    png_path = "output.png"
+    await file.download_to_drive("input.svg")
 
-    await file.download_to_drive(svg_path)
+    cairosvg.svg2png(url="input.svg", write_to="output.png")
 
-    # конвертация SVG → PNG
-    cairosvg.svg2png(url=svg_path, write_to=png_path)
+    await update.message.reply_photo(photo=open("output.png", "rb"))
 
-    # отправка результата
-    await update.message.reply_photo(photo=open(png_path, "rb"))
+    os.remove("input.svg")
+    os.remove("output.png")
 
-    os.remove(svg_path)
-    os.remove(png_path)
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_svg))
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.Document.ALL, handle_svg))
+    print("Bot started...")
+    await app.run_polling()
 
-print("Bot started...")
-app.run_polling()
+if __name__ == "__main__":
+    asyncio.run(main())
